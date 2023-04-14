@@ -1,0 +1,55 @@
+#version 430 core
+// This is the vertex shader
+// The program in this file will be run separately for each vertex in the model
+
+// This is the per-vertex input
+layout(location = 0) in vec4 vPosition;
+layout(location = 1) in vec3 vNormalIn;
+layout(location = 2) in vec2 vTexCoordIn;
+layout(location = 3) in vec3 vTangent;
+layout(location = 4) in vec3 vBitangent;
+
+// These variables will be the same for every vertex in the model
+uniform mat4 modelMat;
+uniform mat4 viewMat;
+uniform mat4 projMat;
+
+uniform vec4 worldSpaceLightPos = {0,0,3,1};
+
+// These are the outputs from the vertex shader
+// The data will (eventually) end up in the fragment shader
+out vec3 NormalV;
+out vec3 LightPosV;
+out vec3 VertPosV;
+out vec2 texCoord;
+out mat3 TBN;
+
+// The actual program, which will run on the graphics card
+void main()
+{
+	// Viewing transformation
+	// Incoming vertex position is multiplied by: modelling matrix, then viewing matrix, then projection matrix
+	// gl_position is a special output variable
+	gl_Position = projMat * viewMat * modelMat * vPosition;
+
+	//TBN Matrix calculations for normal map
+	vec3 T = normalize(vec3(modelMat * vec4(vTangent, 0.0)));
+	vec3 B = normalize(vec3(modelMat * vec4(vBitangent, 0.0)));
+	vec3 N = normalize(vec3(modelMat * vec4(vNormalIn, 0.0)));
+	TBN = mat3(T, B, N);
+
+	
+	// Pass through the texture coordinate
+	texCoord = vTexCoordIn;
+
+	// These two variables will be useful for our lighting calculations in the fragment shader
+	VertPosV = vec3(modelMat * vPosition);
+
+	// This is the light's position in world space
+	
+	LightPosV = vec3(worldSpaceLightPos);
+	
+	// The surface normal is multiplied by the model matrix
+	// This doesn't need to 'move' so we cast down to a 3x3 matrix
+	NormalV =  mat3(modelMat) * vNormalIn;
+}

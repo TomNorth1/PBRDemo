@@ -1,0 +1,178 @@
+#version 430 core
+// This is the fragment shader
+// The program in this file will be run separately for each fragment (pixel) that is drawn
+
+// These are the per-fragment inputs
+// They must match with the outputs of the vertex shader
+in vec3 NormalV;
+in vec3 LightPosV;
+in vec3 VertPosV;
+in vec2 texCoord;
+in mat3 TBN;
+
+
+// These variables will be the same for every vertex in the model
+// They are mostly material and light properties
+// We provide default values in case the program doesn't set them
+uniform vec3 lightColour = {23.47, 21.31, 20.79};
+
+//uniform vec3 lightColour = {10.0, 10.0, 10.0};
+
+uniform sampler2D albedoMap;
+uniform sampler2D roughnessMap;
+uniform sampler2D metallicMap;
+uniform sampler2D normalMap;
+uniform sampler2D dispMap;
+
+uniform vec3 camPos;
+
+uniform float alpha         = 1.0f;
+
+float PI = 3.141592653589793;
+
+// This is the output, it is the fragment's (pixel's) colour
+out vec4 fragColour;
+
+//normal distribution function: Beckman
+float distributionBeckman(float NdotH, float roughness)
+{
+	float cos2Alpha = NdotH * NdotH;
+	float tan2Alpha = (cos2Alpha - 1.0) / cos2Alpha;
+	float roughness2 = roughness * roughness;
+	float denom =  PI * roughness2 * cos2Alpha * cos2Alpha;
+	return exp(tan2Alpha / roughness2) / denom;
+}
+
+
+//geometery function: neumann
+float geometeryNeumann(float NdotV, float NdotL, float roughness)
+{
+	float denom = max(NdotL, NdotV);
+	return NdotL * NdotV / max(denom, 0.0000001);
+}
+
+
+vec3 fresnelSchlick(float HdotV, vec3 baseReflectivity)
+{
+	return baseReflectivity + (1.0 - baseReflectivity) * pow(1.0 - HdotV, 5.0);
+}
+
+// The actual program, which will run on the graphics card
+void main()
+{
+
+	vec3 eyeDir = normalize( camPos - VertPosV );
+
+
+	//parrallax mapping calculation. looks weird at some angles so not very useful for this demo as the objects rotate but added it anyway
+
+	float heightScale = 0.04f;
+	const float minLayers =8.0f;
+	const float maxLayers = 64.0f;
+	float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0f, 0.0f, 1.0f), eyeDir)));
+	float layerDepth = 1.0f / numLayers;
+	float currentLayerDepth = 0.0f;
+
+
+	vec2 S = eyeDir.xy * heightScale;
+	vec2 deltaUVs = S / numLayers;
+
+	vec2 UVs = texCoord;
+	float currentDepthMapValue = 1.0f - texture(dispMap, UVs).r;
+
+	while (currentLayerDepth < currentDepthMapValue)
+	{
+			UVs -= deltaUVs;
+			currentDepthMapValue = 1.0f - texture(dispMap, UVs).r;
+			currentLayerDepth += layerDepth;
+	}
+
+	vec2 prevTexCoords = UVs + deltaUVs;
+	float afterDepth = currentDepthMapValue - currentLayerDepth;
+	float beforeDepth = 1.0f - texture(dispMap, prevTexCoords).r - currentLayerDepth + layerDepth;
+	float weight = afterDepth /(afterDepth - beforeDepth);
+	UVs = prevTexCoords * weight + UVs * (1.0f - weight);
+
+	if(UVs.x > 1.0 || UVs.y > 1.0 || UVs.x < 0.0 || UVs.y < 0.0)
+	{
+			discard;
+	}
+
+	//get information from texture maps
+
+	vec3 albedo = pow(texture(albedoMap, UVs).rgb, vec3(2.2));
+	float metallic = texture(metallicMap, UVs).r;
+	float roughness = texture(roughnessMap, UVs).r;
+	//float metallic = 0.0;
+	//float roughness = 0.2;
+
+
+	// This is the direction from the fragment to the light, in eye-space
+	vec3 lightDir = normalize( LightPosV - VertPosV ); //l
+	// Re-normalise the normal just in case
+	//vec3 normal = normalize( NormalV ); //n
+
+	vec3 normal = texture(normalMap, UVs).rgb;
+	normal = normal * 2.0 - 1.0;
+	normal = normalize(TBN * normal);
+	//vec3 eyeDir = normalize( camPos - VertPosV ); //v
+	vec3 halfVec = normalize( eyeDir + lightDir ); //h
+	float distance = length(LightPosV - VertPosV);
+	float attenuation = 1.0 / (distance * distance);
+	vec3 radiance = lightColour * attenuation;
+
+
+	//if dia-electric use 0.04 if not use metallic
+	vec3 baseReflectivity = mix(vec3(0.04), albedo, metallic);
+	
+	//light calculations
+	vec3 Lo = vec3(0.0);
+
+	//cook torrance BRDF
+
+	float NdotV = max(dot(normal, eyeDir), 0.00000001);
+	float NdotL = max(dot(normal, lightDir), 0.00000001);
+	float HdotV = max(dot(halfVec, eyeDir), 0.0);
+	float NdotH = max(dot(normal, halfVec), 0.0);
+
+	float D = distributionBeckman(NdotH, roughness);
+	float G = geometeryNeumann(NdotV, NdotL, roughness);
+	vec3 F = fresnelSchlick(HdotV, baseReflectivity);
+
+	vec3 specular = D * G * F;
+	specular /= 4.0 * NdotV * NdotL;
+
+	//oren nayar diffuse reflectance model instead of lambertian
+	float angleVN = acos(NdotV);
+	float angleLN = acos(NdotL);
+
+	float alpha = max(angleVN, angleLN);
+	float beta = min(angleVN, angleLN);
+	float gamma = cos(angleVN - angleLN);
+
+	float roughnessSqr = roughness * roughness;
+
+	float A = 1.0 - (roughnessSqr / (2 * (roughnessSqr + 0.33)));
+	float B = 0.45 * (roughnessSqr / (roughnessSqr + 0.09));
+	float C = sin(alpha) * tan(beta);
+
+	float ON = NdotL * (A +(B * max(0.0, gamma) * C));
+
+	vec3 kD = vec3(1.0 - F) * (1.0 - metallic);
+
+	vec3 diffuse = kD * ON * albedo;
+
+	specular *= NdotL * radiance;
+
+	Lo = diffuse + specular;
+
+	vec3 ambient = vec3(0.01) * albedo;
+
+	vec3 colour = Lo + ambient;
+
+	colour = colour / (colour + vec3(1.0));
+
+	colour = pow(colour, vec3(1.0/2.2));
+	
+	fragColour = vec4(colour, alpha);
+}
