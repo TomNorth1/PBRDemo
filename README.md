@@ -15,3 +15,12 @@ Example of PBR implementation.
 Comparison of Lambertian diffuse (Left) and Oren-Nayar diffuse (Right). The Oren-Nayar diffuse is notably brighter and more well lit around the object than Lambertian.
 
 
+![](https://github.com/TomNorth1/PBRDemo/blob/main/smiths_neuman.png?raw=true)
+
+Comparison of Smiths and Neuman geometery functions on a rougher rock surface.
+
+## Instructions on how to run
+1. Clone this project
+2. Navigate to the Release folder
+3. Run the PBRDemo.exe
+
